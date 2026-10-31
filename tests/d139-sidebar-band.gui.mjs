@@ -258,8 +258,8 @@ async function main() {
     // A0 自证：量到的就是这几枚钮（文本逐字；v48.97/D141 起工具栏动作组只剩「截图」——「制卡」钮
     // 与顶栏常驻制卡台入口重复已删，有选区的制卡走选区浮条，故此处期望集随之下调）
     check(
-      "A0 探针自证（页签＝目录/摘录/图谱；动作钮＝截图；开关钮＝收起/展开）",
-      (open.tabs || []).map((x) => x.label).join(",") === "目录,摘录,图谱" &&
+      "A0 探针自证（页签＝目录/摘录（D254 起图谱移出侧栏）；动作钮＝截图；开关钮＝收起/展开）",
+      (open.tabs || []).map((x) => x.label).join(",") === "目录,摘录" &&
         (open.acts || []).map((x) => x.label).join(",") === "截图" &&
         ["收起", "展开"].includes((open.toggle || {}).label),
       JSON.stringify({ tabs: (open.tabs || []).map((x) => x.label), acts: (open.acts || []).map((x) => x.label), toggle: open.toggle && open.toggle.label })
@@ -274,7 +274,7 @@ async function main() {
     const actH = (open.acts || []).map((a) => a.h);
     check(
       "A2 页签钮高 = 工具栏动作钮（截图）高（±0.5）",
-      (open.tabs || []).length === 3 && actH.length >= 1 && (open.tabs || []).every((t) => Math.abs(t.h - actH[0]) <= 0.5),
+      (open.tabs || []).length === 2 && actH.length >= 1 && (open.tabs || []).every((t) => Math.abs(t.h - actH[0]) <= 0.5),
       JSON.stringify({ tabsH: (open.tabs || []).map((t) => t.h), actsH: actH })
     );
     // A3 页签钮与动作钮同顶同底（同一视觉带，不是只有高度相同）
@@ -292,7 +292,7 @@ async function main() {
     // A5 字号语言：页签沿用顶栏导航同档（主役导航），不随右列工具钮降档
     check(
       "A5 页签字号 = 顶栏导航字号（主役页签语言同族）",
-      (open.tabs || []).length === 3 && Boolean(open.topbarNav) && open.tabs.every((t) => t.fs === open.topbarNav.fs),
+      (open.tabs || []).length === 2 && Boolean(open.topbarNav) && open.tabs.every((t) => t.fs === open.topbarNav.fs),
       JSON.stringify({ tabFs: (open.tabs || []).map((t) => t.fs), navFs: open.topbarNav && open.topbarNav.fs })
     );
 
@@ -424,8 +424,8 @@ async function main() {
     console.log("== E 回归口径 ==");
     const errs = [...new Set(cdp.consoleLog)].filter((l) => !l.includes("ResizeObserver loop") && !l.includes("Security Warning") && !l.includes("This warning"));
     // 前置自证：本套件确实跑过（量到了带）——否则「零错误」是空转真命题
-    check("E0 前置自证：本套件量到过按钮带（否则无错误断言空转）", (open.tabs || []).length === 3 && Boolean(open.controls), JSON.stringify({ tabs: (open.tabs || []).length, controls: Boolean(open.controls) }));
-    check("E1 全程无控制台错误/异常", (open.tabs || []).length === 3 && errs.length === 0, JSON.stringify(errs.slice(0, 4)));
+    check("E0 前置自证：本套件量到过按钮带（否则无错误断言空转）", (open.tabs || []).length === 2 && Boolean(open.controls), JSON.stringify({ tabs: (open.tabs || []).length, controls: Boolean(open.controls) }));
+    check("E1 全程无控制台错误/异常", (open.tabs || []).length === 2 && errs.length === 0, JSON.stringify(errs.slice(0, 4)));
 
     await cdp.eval(backToShelf);
     await wait(600);

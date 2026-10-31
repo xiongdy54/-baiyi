@@ -1,247 +1,128 @@
 // @runtime: system-node
-// 材料导图 v2 · 页签端到端 DOM 回归（node tests/m15v2.tab.dom.test.cjs）。
-// 真实 MindmapTab.tsx（tsload 转译）+ jsdom + 真实主进程引擎 mindmapEngineV2 + 内存 store + 假流式模型。
-// window.mindmapAPI 按 preload.js 同名同形装配（invoke 走 JSON 往返模拟 IPC 结构化克隆；delta/changed 异步推送）。
-// 用途：沙箱无 Electron（node_modules 为 win32 二进制、npm 源 403），以此代替「打开应用看画布」：
-//   挂载即出目录预览 → 原文送入 → 预估 → 点「生成导图」→ 流式节点在流结束前出现在 SVG → 完成后树完整 → 点＋深挖。
-const path = require("path");
-const root = path.join(__dirname, "..");
-
-// ---------- jsdom 全局 ----------
-const { JSDOM } = require("jsdom");
-const dom = new JSDOM('<!doctype html><html><body><div id="host"></div><div id="root"></div></body></html>', { pretendToBeVisual: true, url: "http://localhost/" });
-const w = dom.window;
-for (const k of ["window", "document", "navigator", "HTMLElement", "Element", "Node", "SVGElement", "Event", "MouseEvent", "KeyboardEvent", "getComputedStyle", "requestAnimationFrame", "cancelAnimationFrame", "MutationObserver"]) {
-  if (!(k in globalThis) || k === "window" || k === "document" || k === "navigator") {
-    try { Object.defineProperty(globalThis, k, { value: k === "window" ? w : w[k], configurable: true, writable: true }); } catch { /* 只读则跳过 */ }
-  }
-}
-globalThis.IS_REACT_ACT_ENVIRONMENT = false;
-w.HTMLElement.prototype.getBoundingClientRect = function () { return { x: 0, y: 0, left: 0, top: 0, width: 1000, height: 700, right: 1000, bottom: 700 }; };
-
-require("./lib/tsload.cjs");
-const React = require("react");
-const { createRoot } = require("react-dom/client");
-const { createMindmapEngineV2 } = require(path.join(root, "electron", "mindmapEngineV2.js"));
-const { createMemoryStore } = require(path.join(root, "tests", "lib", "mindmapMemoryStore.cjs"));
+// 材料导图 v2 · 全景端到端 DOM 回归（D254 §16.3：由旧页签测试改写）。
+// 运行：node tests/m15v2.tab.dom.test.cjs（system-node；夹具 tests/lib/atlasDomHarness.cjs）。
+// 保留：流式早于流结束 / 重新生成 / 节点卡讲解与详情 / 制卡 / 深挖；新增：拖动舞台只改相机不重建字形。
+const { createHarness } = require("./lib/atlasDomHarness.cjs");
 
 let pass = 0, fail = 0;
 function check(name, cond, detail) {
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
-  else { fail++; console.log(`  ✗ ${name}\n      ${JSON.stringify(detail ?? "").slice(0, 600)}`); }
+  else { fail++; console.log(`  ✗ ${name}\n      ${JSON.stringify(detail ?? "").slice(0, 900)}`); }
 }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-async function until(pred, ms = 8000, step = 20) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(step); }
-  return pred();
-}
-
-// ---------- 夹具书 ----------
-function lcg(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
-const SENT = ["知识是经过检验的信念。", "这个定义解释了记忆的机制。", "作者先提出问题再给出回答。", "反方认为机会平等就够了。", "然而平等的起点也会固化等级。", "数据显示两组差异显著；"];
-function unitText(rnd, chars) {
-  const out = [];
-  let n = 0;
-  while (n < chars) { let p = ""; for (let i = 0; i < 10 + Math.floor(rnd() * 15); i++) p += SENT[Math.floor(rnd() * SENT.length)]; out.push(p); n += p.length; }
-  return out.join("\n\n");
-}
-const rnd = lcg(3);
-const TOC = [
-  { label: "前言", href: "u0.xhtml" },
-  { label: "第一章 问题", href: "u1.xhtml", subitems: [{ label: "1.1 背景", href: "u2.xhtml" }, { label: "1.2 论证", href: "u3.xhtml" }] },
-  { label: "第二章 终章", href: "u4.xhtml" },
-];
-const UNITS = ["u0.xhtml", "u1.xhtml", "u2.xhtml", "u3.xhtml", "u4.xhtml"];
-const TEXT = { "u0.xhtml": unitText(rnd, 1500), "u1.xhtml": unitText(rnd, 800), "u2.xhtml": unitText(rnd, 2500), "u3.xhtml": unitText(rnd, 3000), "u4.xhtml": unitText(rnd, 2000) };
-const kernel = {
-  getTOC: () => TOC,
-  getSectionAnchors: () => UNITS.map((anchor) => ({ anchor })),
-  getSectionText: async (a) => { await sleep(5); return TEXT[a] || ""; },
-  goTo: async () => true,
-};
-
-// ---------- 假流式模型（慢速吐行，便于断言「流结束前已出节点」） ----------
-const streamLog = [];
-function genLines(lo, hi, levels) {
-  const out = [];
-  (function rec(prefix, a, b, lvl) {
-    const n = b - a + 1, k = Math.min(2, n); // 二分：末层仍留 ≥2 块的「＋」节点（检验深挖路径）
-    if (k < 2) return;
-    let s = a;
-    for (let i = 1; i <= k; i++) {
-      const size = Math.floor(n / k) + (i <= n % k ? 1 : 0), from = s, to = s + size - 1;
-      s = to + 1;
-      const p = prefix ? `${prefix}.${i}` : String(i);
-      const last = lvl >= levels, deeper = !last && size >= 2;
-      out.push(`${p} [论点] 节${from}至${to} @${from}-${to} ${deeper ? "+" : last && size >= 2 ? "+" : "."}${i === 2 ? ` &支${prefix ? prefix + "." : ""}1` : ""}`);
-      if (deeper) rec(p, from, to, lvl + 1);
-    }
-  })("", lo, hi, 1);
-  return out;
-}
-async function chatStream(opts, send) {
-  const user = opts.messages[1].content;
-  const kind = opts.maxTokens === 3000 ? "outline" : opts.maxTokens === 1500 ? "expand" : "explain";
-  const entry = { kind, start: Date.now(), end: null };
-  streamLog.push(entry);
-  let raw;
-  if (kind === "explain") raw = "这一节先提出问题，再给出回答。";
-  else {
-    const m = /【原文块号】\[(\d+)\](?:–\[(\d+)\])?/.exec(user);
-    const lv = /【目标层数】(\d+)/.exec(user);
-    raw = genLines(Number(m[1]), Number(m[2] || m[1]), Number(lv[1])).map((l) => l + "\n").join("");
-  }
-  for (let i = 0; i < raw.length; i += 12) {
-    if (opts.abortSignal && opts.abortSignal.aborted) { const e = new Error("cancelled"); e.code = "cancelled"; throw e; }
-    send({ delta: raw.slice(i, i + 12) });
-    await sleep(15);
-  }
-  entry.end = Date.now();
-  return { usage: { prompt_tokens: 100, completion_tokens: 40 }, finishReason: "stop", ttftMs: 10, firstByteMs: 5 };
-}
-
-// ---------- 引擎 + preload 同形桥 ----------
-const store = createMemoryStore();
-const deltaL = new Set(), changedL = new Set();
-const clone = (x) => (x === undefined ? undefined : JSON.parse(JSON.stringify(x)));
-const engine = createMindmapEngineV2({
-  store, chatStream,
-  readSettings: () => ({ app: { mindmapConcurrency: 2 } }),
-  getAIConfig: () => ({ preset: "siliconflow", model: "deepseek-ai/DeepSeek-V4-Flash" }),
-  getPromptTemplate: () => null,
-  broadcastDelta: (p) => { const c = clone(p); setTimeout(() => deltaL.forEach((f) => f(c)), 0); },
-  broadcastChanged: (p) => { const c = clone(p); setTimeout(() => changedL.forEach((f) => f(c)), 0); },
-});
-const inv = (fn) => (p) => new Promise((res, rej) => setTimeout(async () => { try { res(clone(await fn(clone(p)))); } catch (e) { rej(e); } }, 1)); // C-24：引擎 graph* 已 async（keyVault safeStorage 异步化传导），先 await 再 clone
-const errors = [];
-w.mindmapAPI = {
-  list: async (docId) => clone(store.listMaterialMaps(docId)),
-  get: async (id) => clone(store.getMaterialMap(id)),
-  getActive: async (docId) => clone(store.getActiveMaterialMap(docId, "book")),
-  setActive: async (id) => clone(store.setActiveMaterialMap(id)),
-  remove: async (id) => store.deleteMaterialMap(id),
-  learningStatus: async () => ({}),
-  onChanged: (cb) => { changedL.add(cb); return () => changedL.delete(cb); },
-  onDelta: (cb) => { deltaL.add(cb); return () => deltaL.delete(cb); },
-};
-for (const m of ["graphLoad", "graphFeed", "graphEstimate", "graphGenerate", "graphExpand", "graphExpandAll", "graphExplain", "graphCancel", "graphResume", "graphSetView", "graphMetrics", "graphNodeText"]) {
-  w.mindmapAPI[m] = inv((p) => engine[m](p));
-}
-const stages = [];
-changedL.add((p) => stages.push(p.stage));
-w.aiAPI = { getConfig: async () => ({ hasKey: true, preset: "siliconflow" }) };
-w.addEventListener("error", (e) => errors.push(String(e.error && e.error.stack || e.message)));
-const origErr = console.error;
-console.error = (...a) => { errors.push(a.map(String).join(" ").slice(0, 800)); };
 
 (async () => {
-  const { installMindmapBridge } = require(path.join(root, "src", "lib", "mindmap.ts"));
-  const MindmapTab = require(path.join(root, "src", "components", "reader", "MindmapTab.tsx")).default;
-  installMindmapBridge();
-  const host = w.document.getElementById("host");
-  const made = [];
-  const rootEl = createRoot(w.document.getElementById("root"));
-  // 与 src/main.tsx 一致包 StrictMode：开发态 effect 会「挂载→清理→再挂载」（2026-10-18 用户实测画布空白即由此而来）
-  rootEl.render(React.createElement(React.StrictMode, null, React.createElement(MindmapTab, {
-    kernel, documentId: "doc-dom", title: "测试材料", canvasHost: host, onJumpToText: () => {},
-    onMakeCardsFromNode: (p) => made.push(p),
-  })));
-  const svgCards = () => host.querySelectorAll("svg [data-node-id]").length;
-  const panel = () => w.document.getElementById("root").textContent || "";
-  const btn = (re) => [...w.document.querySelectorAll("button")].find((b) => re.test(b.textContent || ""));
+  const h = createHarness();
+  const { w, state } = h;
+  const q = (sel) => w.document.querySelector(sel);
+  const qa = (sel) => [...w.document.querySelectorAll(sel)];
+  const panel = () => w.document.body.textContent || "";
+  const firstStreamEnds = () => h.streamLog.find((e) => e.kind === "outline" && e.end);
+  const aiId = (el) => /^t\d+(p\d+)?\.\d/.test(el.getAttribute("data-node") || "");
 
-  console.log("---- 挂载：目录预览 + 原文送入 + 预估 ----");
-  check("挂载后画布出现目录预览卡片（零调用）", await until(() => svgCards() >= 6), { cards: svgCards(), html: host.innerHTML.slice(0, 300) });
-  check("预览期间零模型调用", streamLog.length === 0);
-  check("原文读完后显示发送前预览（段数/字数/模型）", await until(() => /发送前预览：\d+ 段/.test(panel()) && /DeepSeek-V4-Flash/.test(panel())), panel().slice(0, 400));
-  check("挂载/预览阶段无渲染错误", !errors.length, errors.slice(0, 3));
+  h.render();
 
-  console.log("---- 生成：流式节点早于流结束出现 ----");
-  const gen = btn(/^生成导图$/);
-  check("有「生成导图」按钮", !!gen);
-  gen.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
-  const firstStreamEnds = () => streamLog.find((e) => e.kind === "outline" && e.end);
-  const aiCard = () => [...host.querySelectorAll("svg [data-node-id]")].some((el) => /^t\d+(p\d+)?\.\d/.test(el.getAttribute("data-node-id") || ""));
-  const sawEarly = await until(() => aiCard() || !!firstStreamEnds(), 8000, 5);
-  check("首个 AI 节点在第一次流结束前已画到画布上", sawEarly && aiCard() && !firstStreamEnds(), { aiCard: aiCard(), ended: !!firstStreamEnds(), calls: streamLog.length });
-  check("生成中面板显示「框架 n/m 段」与「停止」", await until(() => /框架 \d+\/\d+ 段/.test(panel()) && !!btn(/^停止$/)), panel().slice(0, 300));
-  await until(() => stages.includes("completed"), 15000);
-  await engine.idle();
-  check("全部作用域完成（面板出现「重新生成」）", await until(() => !!btn(/^重新生成$/), 15000), panel().slice(0, 300));
-  await sleep(500); // 等最后一次布局过渡（260ms）结束
-  const n1 = svgCards();
-  const mapId = store.getActiveMaterialMap("doc-dom", "book").id;
-  const rows = store.listMaterialMapNodes(mapId);
-  check("画布卡片数 ≈ 已落库节点数（根抬升后 = 行数 - 1 + 合成根）", n1 >= Math.min(rows.length, 30) * 0.5 && n1 > 15, { n1, rows: rows.length });
-  check("材料名只出现一次（无「材料名 → 材料名」两层）", (host.innerHTML.match(/测试材料/g) || []).length <= 2, (host.innerHTML.match(/测试材料/g) || []).length);
+  console.log("---- 生成：流式节点早于流结束 ----");
+  check("挂载后目录预览出现（零调用）", await h.until(() => qa("#stage .ag").length >= 3, 10000, 20));
+  const genReady = await h.until(() => { const b = h.btn(/^生成导图$/); return !!b && !b.disabled; }, 15000, 20);
+  const gen = h.btn(/^生成导图$/);
+  check("有可用的「生成导图」按钮", genReady && !!gen);
+  h.click(gen);
+  // 用户展开顶层组后观察流式节点
+  await h.until(() => {
+    const ag = q('#stage .ag[data-node="t1"]');
+    const fold = ag && [...ag.querySelectorAll(".ag-fold")].find((b) => /^\+\d+/.test(h.text(b)));
+    if (fold) { h.click(fold); return true; }
+    return false;
+  }, 8000, 20);
+  const sawEarly = await h.until(() => qa("#stage .ag[data-node]").some(aiId) || !!firstStreamEnds(), 12000, 5);
+  check("首个 AI 节点在第一次流结束前已画到画布上", sawEarly && qa("#stage .ag[data-node]").some(aiId) && !firstStreamEnds(), { card: qa("#stage .ag[data-node]").some(aiId), ended: !!firstStreamEnds(), calls: h.streamLog.length });
+  check("生成中状态区显示「框架 n/m 段」与「停止」", await h.until(() => /框架 \d+\/\d+ 段/.test(panel()) && !!h.btn(/^停止$/), 8000));
+  await h.until(() => h.stages.includes("completed"), 25000);
+  await h.engine.idle();
+  await h.sleep(400);
+
+  console.log("---- 完成后生成菜单出现「重新生成」 ----");
+  h.click(q('[data-atlas-menu="gen"] .dd-btn'));
+  check("生成菜单出现「重新生成」", await h.until(() => !!h.btn(/^重新生成$/), 4000));
+  h.click(q('[data-atlas-menu="gen"] .dd-btn'));
+
+  console.log("---- 节点卡：讲解 / 详情 ----");
+  h.click(q('#stage .ag[data-node="t1"]'));
+  check("节点卡出现", await h.until(() => !!q('[data-atlas-card="t1"]'), 5000));
+  const exBtn = qa('[data-atlas-card="t1"] .flow-actions button').find((b) => /^讲解$/.test(h.text(b)));
+  h.click(exBtn);
+  check("讲解流式显示并落库", await h.until(() => /这一节先提出问题，再给出回答。/.test(h.text(q('[data-atlas-card="t1"]'))), 8000));
+  const detBtn = qa('[data-atlas-card="t1"] .flow-actions button').find((b) => /^详情$/.test(h.text(b)));
+  h.click(detBtn);
+  check("详情：.atlas-detail 出现", await h.until(() => !!q('[data-atlas-card="t1"] .atlas-detail'), 4000));
+
+  console.log("---- 就此制卡 ----");
+  const mkReady = await h.until(() => qa('[data-atlas-card="t1"] .flow-actions button').some((b) => /^制卡$/.test(h.text(b))), 4000);
+  const mk = qa('[data-atlas-card="t1"] .flow-actions button').find((b) => /^制卡$/.test(h.text(b)));
+  h.click(mk);
+  check("就此制卡：回调收到 v2 结构语义包", mkReady && await h.until(() => h.made.length === 1, 12000) && /^v2:/.test(h.made[0].nodeId) && h.made[0].section.length <= 1200 && h.made[0].section.includes("【结构语义包】"), h.made[0] && { nodeId: h.made[0].nodeId, len: h.made[0].section.length });
+
+  console.log("---- 焦点 state:'more' 节点 → 卡内「深挖」→ 子节点出现 ----");
   {
-    // 性能：拖动平移只改外层 transform，不重建内容（同一个 <g> 元素、innerHTML 未重写）
-    await sleep(1200); // 等最后几批增量合入与布局过渡全部落定（静止画面上测平移）
-    const canvasEl = host.querySelector(".mm2-canvas");
-    const vp0 = host.querySelector("svg > g.mm2-viewport");
-    const t0 = vp0 && vp0.getAttribute("transform");
-    const fire = (type, x, buttons) => canvasEl.dispatchEvent(new w.MouseEvent(type, { bubbles: true, clientX: x, clientY: 300, buttons }));
-    fire("pointerdown", 500, 1);
-    for (let x = 510; x <= 640; x += 10) fire("pointermove", x, 1);
-    fire("pointerup", 640, 0);
-    await sleep(200); // 等拖拽后的「吞掉合成 click」窗口（120ms）过去
-    const vp1 = host.querySelector("svg > g.mm2-viewport");
-    check("拖动平移：内容层不重建（同一元素）、只改 transform", vp0 && vp1 === vp0 && vp1.getAttribute("transform") !== t0, { same: vp1 === vp0, t0, t1: vp1 && vp1.getAttribute("transform") });
-  }
-  check("画布下方不再有读数条", !/首节点 [\d.]+s/.test(host.textContent) && !/复制读数/.test(host.textContent), host.textContent.slice(-300));
-  check("生成过程无渲染错误", !errors.length, errors.slice(0, 3));
-
-  console.log("---- 交互：选中 / 深挖 / 讲解 / 制卡 ----");
-  const plus = host.querySelector('svg [data-act="deepen"]');
-  check("存在「＋」深挖钩子", !!plus);
-  const target = plus && plus.getAttribute("data-node-id");
-  const before = streamLog.length;
-  plus.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
-  await until(() => streamLog.length > before, 3000);
-  await engine.idle();
-  await sleep(500);
-  const kids = store.listMaterialMapNodes(mapId).filter((r) => r.parentId === target);
-  check("点＋发起一次 expand，子节点落库并画出", streamLog.length === before + 1 && kids.length >= 2 && kids.every((k) => host.querySelector(`svg [data-node-id="${k.nodeId}"]`)), { target, kids: kids.length });
-  const card = host.querySelector(`svg g[data-node-id="${kids[0] ? kids[0].nodeId : target}"]`);
-  card.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
-  check("选中后面板出现节点详情", await until(() => /节点详情/.test(panel())), panel().slice(0, 200));
-  const ex = btn(/^讲解此节点$/);
-  ex && ex.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
-  check("讲解流式显示并落库", await until(() => /这一节先提出问题，再给出回答。/.test(panel()), 5000));
-  const mk = btn(/^就此制卡$/);
-  mk && mk.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
-  check("就此制卡：回调收到 v2 结构语义包", await until(() => made.length === 1) && /^v2:/.test(made[0].nodeId) && made[0].section.length <= 1200 && made[0].section.includes("【结构语义包】"), made[0]);
-  check("交互过程无渲染错误", !errors.length, errors.slice(0, 3));
-
-  console.log("---- 阅读透镜「在完整图谱中打开」：聚焦 + 透镜区域短暂高亮（第六轮 D194 需求③） ----");
-  {
-    const focusId = kids[0].nodeId;
-    const region = [target, ...kids.map((k) => k.nodeId)];
-    let req = { nodeId: focusId, seq: Date.now(), flash: region };
-    let consumed = 0;
-    const props = () => ({
-      kernel, documentId: "doc-dom", title: "测试材料", canvasHost: host, onJumpToText: () => {},
-      onMakeCardsFromNode: (p) => made.push(p),
-      focusRequest: req,
-      onFocusConsumed: () => { consumed++; req = null; },
-    });
-    rootEl.render(React.createElement(React.StrictMode, null, React.createElement(MindmapTab, props())));
-    const flashRect = () => host.querySelector("svg rect.mm2-flash");
-    check("跳过来后选中被指定的节点（居中定位）", await until(() => !!host.querySelector(`svg [data-sel="1"][data-node-id="${focusId}"]`), 6000), host.innerHTML.slice(-400));
-    check("把透镜展示过的区域整块框出来（主题色高亮区，便于认位置）", await until(() => !!flashRect(), 6000), flashRect() && flashRect().outerHTML);
-    check("高亮区按区域节点的包围盒算（有宽高）", !!flashRect() && Number(flashRect().getAttribute("width")) > 0 && Number(flashRect().getAttribute("height")) > 0, flashRect() && flashRect().outerHTML);
-    check("用完即回执宿主清掉 focusRequest", consumed === 1, consumed);
-    check("强调是短暂的：过了一会儿自动撤掉", await until(() => !flashRect(), 8000), !!flashRect());
-    // 切走页签会卸载本组件：再回来时不该重复聚焦 / 重复高亮（focusRequest 已被宿主清掉）
-    rootEl.render(React.createElement(React.StrictMode, null, React.createElement(MindmapTab, { ...props(), key: "again" })));
-    await sleep(500);
-    check("切走再回来不重复聚焦 / 重复高亮", !flashRect() && !host.querySelector("svg [data-sel='1']"), { flash: !!flashRect(), sel: !!host.querySelector("svg [data-sel='1']") });
-    check("跳转后无渲染错误", !errors.length, errors.slice(0, 3));
+    // 从库里挑一个 state='more' 且尚无子行的 AI 节点：这才能证明「深挖」是它的作用
+    const mapId = h.store.getActiveMaterialMap("doc-dom", "book").id;
+    const rows = h.store.listMaterialMapNodes(mapId);
+    const hasChild = new Set(rows.map((r) => r.parentId).filter(Boolean));
+    const target = rows.find((r) => r.source === "ai" && r.state === "more" && !hasChild.has(r.nodeId));
+    check("库里存在 state='more' 的 AI 节点", !!target, rows.filter((r) => r.state === "more").slice(0, 5).map((r) => r.nodeId));
+    // 用搜索定位（宿主会展开它的祖先）
+    const search = q("[data-atlas-search]");
+    search.focus();
+    const setter = Object.getOwnPropertyDescriptor(w.HTMLInputElement.prototype, "value").set;
+    setter.call(search, target ? target.title : "");
+    search.dispatchEvent(new w.Event("input", { bubbles: true }));
+    const findItem = () => [...w.document.querySelectorAll(".atlas-search-menu .dd-item")].find((b) => h.text(b).startsWith(target ? target.title : ""));
+    const found = await h.until(() => !!findItem(), 4000);
+    const item = findItem();
+    check("搜索结果能定位到该节点", found && !!item);
+    h.click(item);
+    const focusOk = await h.until(() => !!q(`[data-atlas-card="${target.nodeId}"]`), 4000);
+    const before = h.streamLog.length;
+    const deepBtn = focusOk && qa(`[data-atlas-card="${target.nodeId}"] .flow-actions button`).find((b) => /^深挖$/.test(h.text(b)));
+    check("焦点 state='more' 节点时卡内出现「深挖」", !!deepBtn);
+    h.click(deepBtn);
+    await h.until(() => h.streamLog.length > before, 8000);
+    await h.engine.idle();
+    const kidsOk = await h.until(() => qa(`#stage .ag[data-node^="${target.nodeId}."]`).length >= 2, 8000);
+    check("卡内「深挖」→ 子节点出现为 .ag", !!deepBtn && h.streamLog.length === before + 1 && kidsOk, { nid: target.nodeId, calls: h.streamLog.length - before, kids: qa(`#stage .ag[data-node^="${target.nodeId}."]`).length });
   }
 
-  rootEl.unmount();
-  console.error = origErr;
+  console.log("---- 面包屑折叠选单（深层节点） ----");
+  {
+    const more = q("#toolbar .atlas-crumb-more");
+    check("深层节点面包屑出现「…」选单钮", !!more, qa("#toolbar .atlas-crumb").map((e) => h.text(e)));
+    h.click(more);
+    check("点「…」弹出中间层级菜单", await h.until(() => qa(".atlas-crumbs-menu .dd-item").length >= 1, 3000), q(".atlas-crumbs-menu")?.textContent);
+    const before = h.focusAg()?.getAttribute("data-node");
+    h.click(q(".atlas-crumbs-menu .dd-item"));
+    check("点菜单项跳到该层级", await h.until(() => { const f = h.focusAg(); return f && f.getAttribute("data-node") !== before; }, 3000), { before, after: h.focusAg()?.getAttribute("data-node") });
+  }
+
+  console.log("---- 拖动舞台：只改相机，不重建字形 ----");
+  {
+    await h.sleep(700);
+    const world = q("#stage .atlas-world");
+    const t0 = world.style.transform;
+    const ag0 = q('#stage .ag[data-node="t1"]');
+    const stageEl = h.stage();
+    h.pointer(stageEl, "pointerdown", 500, 400, 1);
+    for (let x = 510; x <= 620; x += 10) h.pointer(stageEl, "pointermove", x, 400, 1);
+    h.pointer(stageEl, "pointerup", 620, 400, 0);
+    await h.sleep(120); // 等吞掉合成 click 的窗口过去
+    const ag1 = q('#stage .ag[data-node="t1"]');
+    check("拖动空白 → .atlas-world transform 改变", world.style.transform !== t0, { t0, t1: world.style.transform });
+    check("拖动后 .ag 元素引用不变（不重建内容层）", ag0 === ag1, { same: ag0 === ag1 });
+    state.open = true;
+  }
+
+  check("全程无渲染错误", !h.errors.length, h.errors.slice(0, 3));
+
+  h.restore();
   console.log(`\n结果：${pass} 通过，${fail} 失败`);
   process.exit(fail ? 1 : 0);
-})().catch((e) => { console.error = origErr; console.error(e); process.exit(1); });
+})().catch((e) => { console.log("TEST ERROR", (e && e.stack) || e); process.exit(1); });

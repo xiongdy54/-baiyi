@@ -48,7 +48,7 @@ const genNs = (genKey: string) => genKey.replace(/[^a-zA-Z0-9_-]/g, "_");
 const rawId = (raw: string | number) => String(raw).replace(/[^a-zA-Z0-9_-]/g, "_");
 
 /** 结构流的两层画布根（业务代码的内联 SVG 棘轮只许变少：这里用 createElement 建根，避免新增字面量） */
-const SvgRoot = (props: SVGProps<SVGSVGElement> & { children?: ReactNode } & Record<string, unknown>): ReactElement => createElement("svg", props);
+export const SvgRoot = (props: SVGProps<SVGSVGElement> & { children?: ReactNode } & Record<string, unknown>): ReactElement => createElement("svg", props);
 
 /** 颜色 → 渐变下标（整场稳定：按 palette 顺序先占位） */
 function colorIndexer(colors: FlowScene["colors"]) {
@@ -130,7 +130,7 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
               <span aria-hidden="true">·</span>
               <button type="button" onClick={() => onEvent({ kind: "action", name: "deepen" })}>{T("深挖")}</button>
               <span aria-hidden="true">·</span>
-              <button type="button" onClick={() => onEvent({ kind: "action", name: "openInMap" })}>{T("在完整图谱中打开")}</button>
+              <button type="button" onClick={() => onEvent({ kind: "action", name: "openInMap" })}>{T("在结构全景中查看")}</button>
             </div>
             {inline.explainOpen ? (
               // D255：高度由宿主预留口径 explainBoxH 决定（min=max）——文字再多也在框内滚动，不会长出预留区压住下一条

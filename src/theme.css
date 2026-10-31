@@ -5571,14 +5571,14 @@ body.reader-surface {
      v48.50（D90，用户指令③）：让位**条件化**——轨展开时开关钮浮在轨头（16,56）、不再遮挡工具栏，
      左让位收回 --sp-4（与正文视口同一页面内距 ⇒ 工具栏与正文左对齐）；轨收起时开关钮浮在工具栏区
      （16,56）⇒ 64px 让位保留。padding-left 挂 --dur-panel/--ease 过渡（D139），与轨宽动画同参。 */
-  padding: var(--sp-2) var(--sp-4) var(--sp-2) var(--sp-16);
+  padding: var(--sp-2) var(--sp-4) var(--sp-2) calc(var(--sp-16) + var(--reader-atlas-btn-w, 0px));
   border-bottom: var(--bw-hairline) solid var(--border-subtle);
   background: var(--reader-bg, var(--paper));
   color: var(--reader-fg, var(--text-primary));
   /* 控件随阅读主题换色（v20.1） */
   --reader-border: color-mix(in srgb, var(--reader-fg, #1a1a1a) 28%, transparent);
 }
-.reader-side-rail:not(.is-closed) + .reader-engine-col .reader-engine-controls { padding-left: var(--sp-4); }
+.reader-side-rail:not(.is-closed) + .reader-engine-col .reader-engine-controls { padding-left: calc(var(--sp-2) + var(--reader-atlas-btn-w, 0px)); }
 @media (prefers-reduced-motion: no-preference) {
   /* v48.95（D139）：与 .reader-side-rail 的 width 过渡**逐字同参**（--dur-panel/--ease）+ **同一道门**
      （[data-rail-anim]，见上）——两量既不能不同参、也不能一个受门一个不受，否则动画期间轨缘与
@@ -5592,9 +5592,9 @@ body.reader-surface {
   min-width: 0;
 }
 /* v48.43（D83）：末组（更多/阅读设置/翻页）推到右缘——左侧＝收起/展开 + 选区动作组紧排。
-   D88 §5.2 后 pageinfo（span）成为 controls 的末子节点，改用 :last-of-type 让该组
-   （最后一个 div 组）保持贴右，pageinfo 落在其右端。 */
-.reader-engine-controls-group:last-of-type { margin-left: auto; }
+   D88 §5.2 后 pageinfo（span）成为 controls 的末子节点；D254 又加了 .atlas-toolbar-host（div），
+   :last-of-type 不再指向工具组，故用显式类保持贴右。 */
+.reader-engine-controls-right { margin-left: auto; }
 /* D88 §5.2：页码/章节位（meta 档 mono）——数据来自既有 onRelocate locator；
    页码不可得只显示章节，皆无＝宿主不渲染（禁造假）。窄窗最先退让（§11 第一级）。 */
 .reader-pageinfo {
@@ -10261,4 +10261,180 @@ body[data-flow-resizing="1"] .flow-shift-target { transition: none; }
     transition-delay: 0ms;
     animation-duration: 0ms;
   }
+}
+
+/* ===================== 结构全景（D254 v2，docs/design/STRUCTURE-ATLAS-D254.md） ===================== */
+:root { --atlas-move: 420ms; }
+
+/* 左上入口 */
+.reader-atlas-toggle.bar-btn {
+  position: fixed; left: calc(var(--sp-4) + 40px + var(--sp-2)); top: calc(48px + var(--sp-2));
+  z-index: calc(var(--z-sticky) + 1); height: 24px; padding: 0 var(--sp-3);
+  display: inline-grid; place-items: center; font-size: var(--fs-meta);
+  border-color: var(--border-subtle); color: var(--text-helper);
+  transition: color 160ms var(--flow-ease), border-color 160ms var(--flow-ease), background-color 160ms var(--flow-ease);
+}
+/* D254 实机修订：彻底移出侧栏——轨展开时整枚右移一个轨宽（280），与轨同参过渡（仅用户手势后） */
+.reader-wrap[data-sidebar-open="1"] .reader-atlas-toggle.bar-btn { left: calc(280px + var(--sp-2)); }
+@media (prefers-reduced-motion: no-preference) {
+  .reader-wrap[data-rail-anim] .reader-atlas-toggle.bar-btn { transition: left var(--dur-panel) var(--ease), color 160ms var(--flow-ease), border-color 160ms var(--flow-ease), background-color 160ms var(--flow-ease); }
+}
+.reader-atlas-toggle.bar-btn > span { grid-area: 1 / 1; }
+.reader-atlas-toggle.bar-btn > span[aria-hidden="true"] { visibility: hidden; }
+.reader-atlas-toggle.bar-btn:hover { border-color: var(--text-primary); color: var(--text-primary); }
+.reader-atlas-toggle.bar-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.reader-atlas-toggle-label { animation: atlas-label-in 160ms var(--flow-ease) both; }
+@keyframes atlas-label-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* 工具带交叉淡化 */
+.reader-engine-controls > .atlas-toolbar-host { position: absolute; inset: 0; display: flex; align-items: center; padding: inherit; opacity: 0; pointer-events: none; transition: opacity 160ms var(--flow-ease); }
+.reader-engine-controls > .atlas-toolbar-host:empty { display: none; }
+.reader-engine-controls[data-atlas="1"] > .atlas-toolbar-host { opacity: 1; pointer-events: auto; transition-delay: 60ms; }
+.reader-engine-controls > :not(.atlas-toolbar-host) { transition: opacity 120ms cubic-bezier(0.4, 0, 1, 1); }
+.reader-engine-controls[data-atlas="1"] > :not(.atlas-toolbar-host) { opacity: 0; pointer-events: none; }
+.reader-back-chip { color: var(--accent); }
+.reader-engine-controls[data-atlas="1"] { z-index: 8; }
+
+/* 工具栏 */
+.atlas-toolbar { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-width: 0; }
+.atlas-crumbs { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; overflow: hidden; font-size: 12px; }
+.atlas-crumb { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: none; padding: 0; font: inherit; cursor: pointer; color: color-mix(in srgb, var(--reader-fg, var(--ink)) 62%, transparent); }
+.atlas-crumb:hover { color: var(--reader-fg, var(--ink)); }
+.atlas-crumb[aria-current="page"] { max-width: 260px; cursor: default; font-weight: 600; color: color-mix(in srgb, var(--reader-fg, var(--ink)) 90%, transparent); }
+.atlas-crumb-sep { margin: 0 4px; color: color-mix(in srgb, var(--reader-fg, var(--ink)) 30%, transparent); }
+.atlas-chip { margin-left: 6px; padding: 0 5px; font-size: 10px; line-height: 14px; border: 1px solid color-mix(in srgb, var(--reader-fg, var(--ink)) 22%, transparent); color: color-mix(in srgb, var(--reader-fg, var(--ink)) 62%, transparent); }
+.atlas-status { position: relative; display: inline-flex; align-items: center; gap: 6px; max-width: 260px; font-size: 12px; color: color-mix(in srgb, var(--reader-fg, var(--ink)) 62%, transparent); }
+.atlas-status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.atlas-status-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--reader-fg, var(--ink)) 40%, transparent); }
+.atlas-status[data-busy="1"] .atlas-status-dot { background: var(--accent); animation: flow-dot 1200ms var(--flow-ease) infinite ease-in-out; }
+.atlas-status-bar { position: absolute; left: 12px; right: 0; bottom: -3px; height: 1px; background: color-mix(in srgb, var(--reader-fg, var(--ink)) 10%, transparent); }
+.atlas-status-bar i { display: block; height: 100%; background: var(--accent); transition: width 300ms var(--flow-ease); }
+.atlas-status-x { background: none; border: none; padding: 0 2px; font: inherit; cursor: pointer; color: inherit; }
+.atlas-toolbar[data-narrow="1"] .atlas-status-text { display: none; }
+.atlas-search-wrap { position: relative; }
+.atlas-search { width: 200px; height: 24px; padding: 0 var(--sp-2); font-size: 12px; border: var(--bw-hairline) solid var(--reader-border, var(--border-subtle)); background: transparent; color: inherit; transition: width 160ms var(--flow-ease); }
+.atlas-search:focus { width: 280px; outline: none; border-color: var(--accent); }
+.atlas-toolbar[data-narrow="1"] .atlas-search { width: 140px; }
+.atlas-search-menu { position: absolute; top: 28px; left: 0; min-width: 280px; max-height: 360px; overflow-y: auto; }
+.atlas-search-menu .dd-item small { display: block; font-size: 11px; color: var(--text-helper); }
+.atlas-menu-sec { width: 320px; padding: var(--sp-3); font-size: 13px; }
+.atlas-menu-sec .dd-sep { height: 1px; margin: var(--sp-2) 0; background: var(--border-subtle); }
+.atlas-crumbs-menu { position: fixed; z-index: calc(var(--z-sticky) + 2); min-width: 240px; }
+.atlas-versions li.is-current { box-shadow: inset 2px 0 0 var(--accent); }
+.atlas-menu-note { font-size: 12px; color: var(--text-helper); margin: 0 0 var(--sp-2); }
+.atlas-zoom { display: inline-flex; align-items: center; height: 24px; border: var(--bw-hairline) solid var(--reader-border, var(--border-subtle)); }
+.atlas-zoom button { background: none; border: none; height: 22px; min-width: 24px; padding: 0 6px; font: inherit; font-size: 12px; color: inherit; cursor: pointer; font-variant-numeric: tabular-nums; }
+
+/* 舞台 */
+.reader-atlas-layer { position: absolute; inset: 0; z-index: 7; }
+.reader-atlas-layer:empty { display: none; }
+.atlas-stage { position: absolute; inset: 0; overflow: hidden; outline: none; color: var(--reader-fg, var(--ink)); font-family: var(--font-sans); user-select: none; -webkit-user-select: none; touch-action: none; }
+.atlas-stage[data-panning="1"] { cursor: grabbing; }
+.atlas-stage:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.atlas-bg { position: absolute; inset: 0; background: var(--reader-bg, var(--paper)); }
+.atlas-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; transition: transform var(--atlas-move) var(--flow-ease); }
+.atlas-stage[data-panning="1"] .atlas-world { transition: none; }
+.atlas-svg { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.atlas-svg path { transition: d var(--atlas-move) var(--flow-ease), opacity 240ms var(--flow-ease); }
+.atlas-svg rect, .atlas-svg circle {
+  transition: x var(--atlas-move) var(--flow-ease), y var(--atlas-move) var(--flow-ease), width var(--atlas-move) var(--flow-ease), height var(--atlas-move) var(--flow-ease),
+    cx var(--atlas-move) var(--flow-ease), cy var(--atlas-move) var(--flow-ease), r 200ms var(--flow-ease), fill 200ms var(--flow-ease), opacity 240ms var(--flow-ease);
+}
+.atlas-svg text { transition: opacity 240ms var(--flow-ease); }
+
+/* 字形（D254 修订）：节点＝圆角「标签胶囊」——节点色 7% 淡底 + 节点色 26% 细描边，取代随文结构的左侧竖条；
+   左右内边距 10（＝ atlasLayout glyphPadH），表格单元格 / 栏名不加胶囊。文字恒完整显示，不省略。 */
+.ag {
+  --c: currentColor;
+  --ag-fg: var(--reader-fg, var(--ink));
+  --ag-bg: var(--reader-bg, var(--paper));
+  position: absolute; left: 0; top: 0; box-sizing: border-box; padding: 4px 10px; cursor: pointer;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--c) 7%, var(--ag-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 26%, transparent);
+  transition: transform var(--atlas-move) var(--flow-ease), width var(--atlas-move) var(--flow-ease), height var(--atlas-move) var(--flow-ease), opacity 240ms var(--flow-ease),
+    background-color 160ms var(--flow-ease), box-shadow 160ms var(--flow-ease);
+}
+.ag[data-align="center"] { text-align: center; }
+.ag[data-kind="cell"], .ag[data-kind="colhead"] { padding: 4px 0; background: none; box-shadow: none; border-radius: 0; }
+/* 展开中的组头：底色与描边加深一档，让「这一片归它管」一眼可辨 */
+.ag[data-head="1"] { background: color-mix(in srgb, var(--c) 12%, var(--ag-bg)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 42%, transparent); }
+.ag[data-head="1"] .ag-text { font-weight: 600; }
+/* 主张：更厚的描边 + 更浓的底 */
+.ag[data-kind="claim"] { border-radius: 10px; background: color-mix(in srgb, var(--c) 14%, var(--ag-bg)); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--c) 55%, transparent); }
+/* 根：实心墨色胶囊、反白字——整张图的锚 */
+.ag[data-kind="root"] { border-radius: 10px; background: color-mix(in srgb, var(--ag-fg) 88%, var(--ag-bg)); box-shadow: none; }
+.ag[data-kind="root"] .ag-text, .ag[data-kind="root"] .ag-meta { color: var(--ag-bg); }
+/* 例证：虚线描边；反方：反方色描边 + 淡底；「另 N 项」：无底虚线 */
+.ag[data-example="1"] { box-shadow: none; outline: 1px dashed color-mix(in srgb, var(--c) 45%, transparent); outline-offset: -1px; }
+.ag[data-counter="1"] { background: color-mix(in srgb, var(--flow-counter) 6%, var(--ag-bg)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--flow-counter) 45%, transparent); }
+.ag[data-kind="more"] { background: none; box-shadow: none; outline: 1px dashed color-mix(in srgb, var(--ag-fg) 22%, transparent); outline-offset: -1px; }
+.ag-text { display: block; color: color-mix(in srgb, var(--ag-fg) 88%, transparent); }
+.ag-line { display: block; white-space: nowrap; overflow: visible; }
+.ag[data-kind="cell"] .ag-text { color: color-mix(in srgb, var(--ag-fg) 84%, transparent); }
+.ag[data-kind="more"] .ag-text { color: color-mix(in srgb, var(--ag-fg) 52%, transparent); }
+.ag-time { display: block; font-family: var(--font-mono, inherit); font-variant-numeric: tabular-nums; font-size: 11px; line-height: 15px; color: color-mix(in srgb, var(--ag-fg) 58%, transparent); white-space: nowrap; }
+.ag-meta { display: flex; align-items: center; gap: 6px; height: 15px; font-size: 10.5px; color: color-mix(in srgb, var(--ag-fg) 46%, transparent); }
+.ag[data-align="center"] .ag-meta { justify-content: center; }
+.ag[data-counter="1"] .ag-type { color: var(--flow-counter); }
+.ag[data-counter="1"] .ag-type::before { content: "⟂ "; }
+.ag-fold { background: none; border: none; padding: 0 2px; font: inherit; font-variant-numeric: tabular-nums; color: inherit; cursor: pointer; }
+.ag-fold:hover { color: color-mix(in srgb, var(--ag-fg) 90%, transparent); }
+.ag-fold-cell { position: absolute; right: 0; bottom: 2px; font-size: 10.5px; }
+.ag:hover { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 60%, transparent); }
+.ag:hover .ag-text { color: var(--ag-fg); }
+.ag[data-kind="cell"]:hover, .ag[data-kind="colhead"]:hover { box-shadow: none; }
+/* 焦点：主题色描边 + 主题色淡底 + 主题色字 */
+.ag[data-focus="1"] { background: color-mix(in srgb, var(--accent) 10%, var(--ag-bg)); box-shadow: inset 0 0 0 1.5px var(--accent), 0 6px 18px -12px color-mix(in srgb, var(--accent) 60%, transparent); outline: none; }
+.ag[data-focus="1"] .ag-text { color: var(--accent); }
+.ag[data-kind="root"][data-focus="1"] { background: var(--accent); }
+.ag[data-kind="root"][data-focus="1"] .ag-text { color: var(--accent-on, var(--ag-bg)); }
+.ag[data-dim="1"] { opacity: 0.28; transition-duration: var(--atlas-move), var(--atlas-move), var(--atlas-move), 160ms, 160ms, 160ms; }
+.atlas-world[data-lod="1"] .ag-meta, .atlas-world[data-lod="1"] .ag-time { display: none; }
+/* 树枝：细线 + 圆头；通向焦点的那一枝加重（宽度由 TSX 写 2px） */
+.atlas-edge[data-kind="fan"] { stroke-linecap: round; }
+
+/* 节点卡 */
+.atlas-overlay { position: absolute; inset: 0; pointer-events: none; }
+.atlas-card-slot { position: absolute; left: 0; top: 0; pointer-events: auto; }
+.atlas-card {
+  box-sizing: border-box; padding: 6px 12px 8px; max-height: 340px; overflow-y: auto;
+  background: var(--reader-bg, var(--paper)); border: 1px solid color-mix(in srgb, var(--reader-fg, var(--ink)) 12%, transparent);
+  border-radius: 8px; box-shadow: 0 14px 36px -20px rgba(0, 0, 0, 0.35);
+  animation: flow-inline-in 220ms var(--flow-ease) both; animation-delay: var(--flow-delay, 0ms);
+}
+.atlas-card .flow-actions { flex-wrap: wrap; height: auto; min-height: 26px; }
+.atlas-card-act { display: inline-flex; align-items: center; gap: 6px; }
+.atlas-card .atlas-card-hint { font-size: 12px; color: color-mix(in srgb, var(--reader-fg, var(--ink)) 52%, transparent); }
+.atlas-detail { padding: 4px 0 2px; font-size: 12px; line-height: 18px; color: color-mix(in srgb, var(--reader-fg, var(--ink)) 78%, transparent); }
+.atlas-detail-meta { margin: 0 0 4px; color: color-mix(in srgb, var(--reader-fg, var(--ink)) 52%, transparent); }
+.atlas-rel-list { list-style: none; margin: 4px 0; padding: 0; }
+.atlas-rel-list button, .atlas-link-btn { background: none; border: none; padding: 2px 0; font: inherit; text-align: left; cursor: pointer; color: color-mix(in srgb, var(--reader-fg, var(--ink)) 72%, transparent); }
+.atlas-rel-list button:hover, .atlas-link-btn:hover { color: var(--reader-fg, var(--ink)); text-decoration: underline var(--accent) 1px; text-underline-offset: 3px; }
+.atlas-detail-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.atlas-select { height: 22px; font: inherit; font-size: 12px; background: transparent; color: inherit; border: var(--bw-hairline) solid color-mix(in srgb, var(--reader-fg, var(--ink)) 22%, transparent); }
+.atlas-source { margin: 6px 0 0; padding-left: 8px; border-left: 2px solid color-mix(in srgb, var(--reader-fg, var(--ink)) 14%, transparent); max-height: 200px; overflow-y: auto; white-space: pre-wrap; }
+
+/* 空态 */
+.atlas-empty-stage { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); text-align: center; font-size: 12px; color: color-mix(in srgb, var(--reader-fg, var(--ink)) 60%, transparent); }
+.atlas-empty-stage button { background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; margin-top: 6px; }
+.atlas-skel { display: block; height: 8px; margin: 0 auto 10px; background: color-mix(in srgb, var(--reader-fg, var(--ink)) 8%, transparent); animation: atlas-shimmer 1400ms var(--flow-ease) infinite alternate; }
+@keyframes atlas-shimmer { from { opacity: 0.5; } to { opacity: 1; } }
+
+/* 首帧（交接）与降级：用更高特异性压过各元素自身的过渡 */
+.atlas-stage[data-frame0="1"] .atlas-world,
+.atlas-stage[data-frame0="1"] .ag,
+.atlas-stage[data-frame0="1"] .atlas-svg path,
+.atlas-stage[data-frame0="1"] .atlas-svg rect,
+.atlas-stage[data-frame0="1"] .atlas-svg circle,
+.atlas-stage[data-motion="off"] .atlas-world,
+.atlas-stage[data-motion="off"] .ag,
+.atlas-stage[data-motion="off"] .atlas-svg path,
+.atlas-stage[data-motion="off"] .atlas-svg rect,
+.atlas-stage[data-motion="off"] .atlas-svg circle,
+.atlas-stage[data-motion="off"] .atlas-card { transition-duration: 0ms; transition-delay: 0ms; animation-duration: 0ms; animation-delay: 0ms; }
+.atlas-stage[data-motion="off"] .ag { transition: opacity 120ms linear; }
+@media (prefers-reduced-motion: reduce) {
+  .atlas-world, .atlas-stage .ag, .atlas-stage .atlas-svg path, .atlas-stage .atlas-svg rect, .atlas-stage .atlas-svg circle, .atlas-card,
+  .reader-atlas-toggle-label, .reader-engine-controls > * { transition-duration: 0ms; transition-delay: 0ms; animation-duration: 0ms; animation-delay: 0ms; }
 }
