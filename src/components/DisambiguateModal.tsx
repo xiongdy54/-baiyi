@@ -27,6 +27,7 @@ import {
   type Side
 } from "../lib/disambiguateUi";
 import { useDialogA11y } from "../lib/dialogA11y";
+import { useOverlayBackdrop } from "../lib/overlayDismiss";
 import { eventBus } from "../lib/eventbus";
 import CandidatePicker from "./disambiguate/CandidatePicker";
 import CardPane from "./disambiguate/CardPane";
@@ -115,6 +116,7 @@ export default function DisambiguateModal({
     });
   }, [onClose, origin, skipAfter]);
   const panelRef = useDialogA11y<HTMLDivElement>(close);
+  const backdrop = useOverlayBackdrop(panelRef, close);
 
   // ---- 加载：全部卡 + AI 可用性 + A 的原文（打开即显示，均为本地读；无网络调用） ----
   // C-18c 复核：此处保留 listAll 全集——rankDisambiguationCandidates 要对全库卡面
@@ -358,10 +360,7 @@ export default function DisambiguateModal({
   return (
     <div
       className="modal-backdrop"
-      onClick={(e) => {
-        e.stopPropagation();
-        close();
-      }}
+      {...backdrop}
     >
       <div
         className="modal-panel disamb-modal"

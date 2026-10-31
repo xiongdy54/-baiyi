@@ -1444,6 +1444,16 @@ export default function ReviewView({
           onClose={(r) => void handleDisambClose(r)}
         />
       )}
+      {lightboxOpen && current?.cardType === "imageOcclusion" && current.occlusionJson && (
+        <ImageLightbox
+          assetPath={current.occlusionJson.assetPath}
+          rects={current.occlusionJson.rects}
+          shapes={current.occlusionJson.shapes}
+          regionScope={current.occlusionJson.regionScope}
+          cardOrd={current.cardOrd}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
     </div>
   );
 }

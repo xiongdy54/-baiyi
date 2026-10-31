@@ -21,6 +21,7 @@ import OcclusionShapes from "./OcclusionShapes";
 import ImageLightbox from "./ImageLightbox";
 import { IconVolume, IconChevronDown } from "./icons";
 import { useDialogA11y } from "../lib/dialogA11y";
+import { useOverlayBackdrop } from "../lib/overlayDismiss";
 import KnowledgeManager from "./KnowledgeManager";
 // v48.61（D103）：血缘树纯函数（D87 邻接表口径 + D85 聚合计数，复用零新写路径）
 import { buildLineageTree, type LineageExtractRow, type LineageNode } from "../lib/cardLineage";
@@ -2733,6 +2734,7 @@ export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRec
   const [freshCard, setFreshCard] = useState<CardRecord | null>(null);
   const card = freshCard ?? cardProp;
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
+  const backdrop = useOverlayBackdrop(panelRef, onClose);
   const [step, setStep] = useState(0);
   const [diagnosis, setDiagnosis] = useState<{ diagnosis?: string; analysis?: string; suggestions?: string[] } | null>(null);
   const [running, setRunning] = useState(false);
@@ -2776,8 +2778,8 @@ export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRec
 
   const steps = [T("诊断"), T("补卡"), T("问法"), T("取舍"), T("暂缓"), T("助记")];
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label={T("记忆难点六步处理")} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" {...backdrop}>
+      <div className="modal-panel modal-panel-content" ref={panelRef} role="dialog" aria-modal="true" aria-label={T("记忆难点六步处理")} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>{T("记忆难点 · 六步处理")}</h2>
           <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>

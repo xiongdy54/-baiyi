@@ -7,6 +7,7 @@ import { useRef, useState } from "react";
 import { BOOK_LANGUAGES } from "../lib/library";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { useDismiss } from "../lib/useDismiss";
+import { useOverlayBackdrop } from "../lib/overlayDismiss";
 import { IconAlert, IconClose } from "./icons";
 import MarkdownEditor, { type MarkdownEditorApi } from "./editor/MarkdownEditor";
 import { useT } from "../lib/i18n";
@@ -21,6 +22,7 @@ export default function PasteMaterialModal({ onSave, onClose }: Props) {
   // D120 §8.1：出场两步走——Esc / 遮罩 / 关闭·取消按钮 / 保存成功自动关，全部收口到 requestClose
   const { show, requestClose } = useDismiss(onClose);
   const panelRef = useDialogA11y<HTMLDivElement>(requestClose);
+  const backdrop = useOverlayBackdrop(panelRef, requestClose);
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
   // 编辑器实例就绪后把光标落到文档末尾（空文档＝开头）：开窗即贴，Ctrl+V 直接可粘
@@ -49,7 +51,7 @@ export default function PasteMaterialModal({ onSave, onClose }: Props) {
   }
 
   return (
-    <div className="modal-backdrop" data-show={show ? "in" : "out"} onClick={requestClose}>
+    <div className="modal-backdrop" data-show={show ? "in" : "out"} {...backdrop}>
       <div className="modal-panel paste-modal" data-show={show ? "in" : "out"} ref={panelRef} role="dialog" aria-modal="true" aria-label={T("粘贴材料")} onClick={(e) => e.stopPropagation()}>
         {/* D177-b（用户反馈）：说明文字退役——书名/语言提示收进 placeholder / aria-label / title，
             头行单行「标题 + 书名框 + 语言选框 + 关闭」垂直居中对齐 */}

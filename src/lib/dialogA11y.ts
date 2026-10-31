@@ -33,11 +33,16 @@ const FOCUSABLE =
  */
 const stack: HTMLElement[] = [];
 
+export function isDialogStackTop(panel: HTMLElement | null): boolean {
+  return Boolean(panel) && stack[stack.length - 1] === panel;
+}
+
 export function useDialogA11y<T extends HTMLElement>(
   onClose: () => void,
-  opts?: { trap?: boolean }
+  opts?: { trap?: boolean; escape?: boolean }
 ) {
   const trap = opts?.trap !== false;
+  const escape = opts?.escape !== false;
   const ref = useRef<T>(null);
   // onClose 每次渲染都是新函数；放进 ref 里读，避免因此反复重挂监听
   const closeRef = useRef(onClose);
@@ -55,6 +60,7 @@ export function useDialogA11y<T extends HTMLElement>(
     const onKey = (e: KeyboardEvent) => {
       if (!isTop()) return; // 嵌套时只让最上面那个模态响应
       if (e.key === "Escape") {
+        if (!escape) return;
         e.stopPropagation();
         closeRef.current();
         return;

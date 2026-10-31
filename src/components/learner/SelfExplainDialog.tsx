@@ -7,6 +7,7 @@ import { learnerStrings } from "../../lib/learnerStrings";
 import { eventBus } from "../../lib/eventbus";
 import { growTextarea } from "../../lib/autoGrow";
 import { useDialogA11y } from "../../lib/dialogA11y";
+import { useOverlayBackdrop } from "../../lib/overlayDismiss";
 
 type JumpAction = { type: "jump"; documentId: string; anchor: { anchorText: string; anchorRatio?: number; pageIndex?: number; cfi?: string } };
 
@@ -27,6 +28,7 @@ export default function SelfExplainDialog({
 }) {
   const S = learnerStrings();
   const ref = useDialogA11y<HTMLDivElement>(onClose);
+  const backdrop = useOverlayBackdrop(ref, onClose);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
   const [source, setSource] = useState<JumpAction | null>(null);
@@ -69,7 +71,7 @@ export default function SelfExplainDialog({
   }
 
   return (
-    <div className="modal-backdrop" data-show="in" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-backdrop" data-show="in" {...backdrop}>
       <div className="modal-panel" ref={ref} role="dialog" aria-modal="true" aria-label={S.selfExplain.title}>
         <div className="modal-header">
           <h3>{S.selfExplain.title}</h3>

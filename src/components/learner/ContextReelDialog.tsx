@@ -5,12 +5,14 @@ import { learnerApi } from "../../lib/learner";
 import { learnerStrings } from "../../lib/learnerStrings";
 import { eventBus } from "../../lib/eventbus";
 import { useDialogA11y } from "../../lib/dialogA11y";
+import { useOverlayBackdrop } from "../../lib/overlayDismiss";
 
 type ReelResult = NonNullable<Awaited<ReturnType<typeof learnerApi.contextReel>>>;
 
 export default function ContextReelDialog({ lang, lexKey, onClose }: { lang: string; lexKey: string; onClose: () => void }) {
   const S = learnerStrings();
   const ref = useDialogA11y<HTMLDivElement>(onClose);
+  const backdrop = useOverlayBackdrop(ref, onClose);
   const [data, setData] = useState<ReelResult | null>(null);
   const [error, setError] = useState("");
 
@@ -46,8 +48,8 @@ export default function ContextReelDialog({ lang, lexKey, onClose }: { lang: str
   }
 
   return (
-    <div className="modal-backdrop" data-show="in" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal-panel" ref={ref} role="dialog" aria-modal="true" aria-label={S.contextReel.title}>
+    <div className="modal-backdrop" data-show="in" {...backdrop}>
+      <div className="modal-panel modal-panel-content" ref={ref} role="dialog" aria-modal="true" aria-label={S.contextReel.title}>
         <div className="modal-header">
           <h3 dir="auto">{data ? data.word : S.contextReel.title}</h3>
           <button className="icon-btn" aria-label="close" onClick={onClose}>

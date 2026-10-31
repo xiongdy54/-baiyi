@@ -19,6 +19,9 @@ import type { OcclusionRegion } from "../../lib/cards";
 import { settle } from "../../lib/press";
 import { useT } from "../../lib/i18n";
 import { isTextEntryTarget } from "../../lib/keyTarget";
+import { isDialogStackTop, useDialogA11y } from "../../lib/dialogA11y";
+import { useOverlayBackdrop } from "../../lib/overlayDismiss";
+import { fitImage } from "../../lib/imageFit.mjs";
 
 type Tool = "rect" | "ellipse" | "polygon";
 
@@ -187,7 +190,8 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
   const [aiBusy, setAiBusy] = useState(false);
   const [ghost, setGhost] = useState<EditorMask | null>(null);   // 删除退场动画的残影
   const [size, setSize] = useState({ w: 0, h: 0 });
-  const [displayWidth, setDisplayWidth] = useState<number | null>(null);
+  const [naturalSize, setNaturalSize] = useState({ w: 0, h: 0 });
+  const [fitBox, setFitBox] = useState({ w: 0, h: 0 });
   const [entered, setEntered] = useState(false);
   const [flyOrigin, setFlyOrigin] = useState<{ dx: number; dy: number; sx: number; sy: number } | null>(null);
   // 段控滑移指示条（state-changes 200ms）
@@ -195,6 +199,7 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
   const [segInd, setSegInd] = useState({ left: 0, width: 0 });
 
   const idRef = useRef(0);
+  const layerRef = useDialogA11y<HTMLDivElement>(onClose, { escape: false });
   const stageRef = useRef<HTMLDivElement>(null);
   const imgBoxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<SVGSVGElement>(null);
@@ -273,11 +278,49 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
     setSelId((prev) => (st.m.some((m) => m.id === prev) ? prev : null));
   }, []);
   const dirty = (baselineRef.current ? snap() !== baselineRef.current : false) || frontText.trim() !== "";
+  const requestClose = useCallback(() => {
+    if (dirty) setConfirmOpen(true);
+    else onClose();
+  }, [dirty, onClose]);
+  const backdrop = useOverlayBackdrop(layerRef, requestClose, {
+    isBlank: (target, currentTarget) =>
+      target === currentTarget ||
+      (target instanceof Element && (
+        target.classList.contains("occlusion-editor-main") ||
+        target.classList.contains("occlusion-editor-stage")
+      ))
+  });
   // 首帧后记基线（空画布不算未保存改动）
   useEffect(() => {
     if (!baselineRef.current) baselineRef.current = JSON.stringify(masks);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // D256：图片按主区真实可用盒 contain；工具栏与题注在 flex 流内，不参与图片可用区。
+  useLayoutEffect(() => {
+    const stage = stageRef.current;
+    if (!stage || naturalSize.w <= 0 || naturalSize.h <= 0) {
+      if (fitBox.w || fitBox.h) setFitBox({ w: 0, h: 0 });
+      return;
+    }
+    const measure = () => {
+      const caption = stage.querySelector<HTMLElement>(".image-focus-caption");
+      const gap = parseFloat(getComputedStyle(stage).rowGap || "0") || 0;
+      const captionH = caption ? caption.getBoundingClientRect().height + gap : 0;
+      const fitted = fitImage(naturalSize.w, naturalSize.h, stage.clientWidth, stage.clientHeight - captionH, 1);
+      setFitBox((prev) => (
+        Math.abs(prev.w - fitted.width) < 0.5 && Math.abs(prev.h - fitted.height) < 0.5
+          ? prev
+          : { w: fitted.width, h: fitted.height }
+      ));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(stage);
+    const caption = stage.querySelector<HTMLElement>(".image-focus-caption");
+    if (caption) ro.observe(caption);
+    return () => ro.disconnect();
+  }, [naturalSize.w, naturalSize.h, image.alt]);
 
   const pushUndo = pushUndoState; // 兼容别名（R1 命名）
 
@@ -653,6 +696,7 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
   // Esc 链：裁剪草稿 → 裁剪框 → 裁剪模式 → 多边形草稿 → 关闭确认 → 关闭；Del/Ctrl+Z/1-3 与输入态守卫
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!isDialogStackTop(layerRef.current)) return;
       // D227：只有文本输入算「在打字」（滑块 / 复选框聚焦时 Del / Ctrl+Z / 1-3 照常可用）
       const typing = isTextEntryTarget(document.activeElement);
       if (e.key === "Escape") {
@@ -662,8 +706,7 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
         if (cropMode) { exitCrop(); return; }
         if (polyRef.current) { polyRef.current = null; setPoly(null); setHover(null); return; }
         if (confirmOpen) { setConfirmOpen(false); return; }
-        if (dirty) { setConfirmOpen(true); return; }
-        onClose();
+        requestClose();
         return;
       }
       if (typing || saving || cropMode) return;
@@ -709,15 +752,17 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
 
   return (
     <div
+      ref={layerRef}
       className={`occlusion-editor-layer${entered ? " occlusion-editor-in" : ""}`}
       role="dialog"
       aria-modal="true"
       aria-label={T("图片挖空编辑器")}
       data-testid="occlusion-editor"
+      {...backdrop}
     >
       <div className="occlusion-editor-main">
         {/* R1：单行紧凑工具条——随主区在流内定位（与右栏无覆盖可能），无提示文案 */}
-        <div className="occlusion-editor-toolbar" role="toolbar" aria-label={T("挖空编辑工具")}>
+        <div className="occlusion-editor-toolbar image-overlay-toolbar" role="toolbar" aria-label={T("挖空编辑工具")}>
           <div className={`occl-seg${cropMode ? " cropping" : ""}`} role="tablist" aria-label={T("遮罩形状")} ref={segRef}>
             <div className="occl-seg-ind" style={{ left: segInd.left, width: segInd.width }} />
             {TOOLS.map((t) => (
@@ -805,6 +850,13 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
               </button>
             </>
           )}
+          <span className="occl-toolbar-div" />
+          <button type="button" className="image-focus-close occl-close-inline" title={T("关闭（Esc）")} aria-label={T("关闭编辑器")} data-testid="occl-close" onClick={requestClose}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
         </div>
 
         <div
@@ -820,13 +872,11 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
               src={imgUrl}
               alt={image.alt || ""}
               draggable={false}
-              style={displayWidth ? { width: `${displayWidth}px`, height: "auto" } : undefined}
+              style={fitBox.w > 0 ? { width: `${fitBox.w}px`, height: `${fitBox.h}px` } : { visibility: "hidden" }}
               onLoad={(e) => {
-                // 小图放大：书内插图常见一两百像素宽，原尺寸无法精确框选（与项目既有策略一致）
                 const nw = e.currentTarget.naturalWidth;
-                if (!nw) return;
-                const minW = 480;
-                setDisplayWidth(nw < minW ? Math.round(nw * Math.min(4, minW / nw)) : null);
+                const nh = e.currentTarget.naturalHeight;
+                if (nw > 0 && nh > 0) setNaturalSize({ w: nw, h: nh });
               }}
             />
             {/* 序号徽标：贴每块遮罩包围盒左上角（点击＝选中，与画布选中态双向同步） */}
@@ -1022,13 +1072,6 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
         <button type="button" className="btn btn-sm" onClick={() => setConfirmOpen(false)}>{T("继续编辑")}</button>
         <button type="button" className="btn btn-sm btn-danger" onClick={onClose}>{T("丢弃并关闭")}</button>
       </div>
-
-      <button type="button" className="image-focus-close" title={T("关闭（Esc）")} aria-label={T("关闭编辑器")} data-testid="occl-close" onClick={() => (dirty ? setConfirmOpen(true) : onClose())}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-          <path d="M18 6 6 18" />
-          <path d="m6 6 12 12" />
-        </svg>
-      </button>
     </div>
   );
 }

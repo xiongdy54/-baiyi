@@ -6,10 +6,12 @@ import { learnerApi, type PlacementBand } from "../../lib/learner";
 import { learnerStrings } from "../../lib/learnerStrings";
 import { eventBus } from "../../lib/eventbus";
 import { useDialogA11y } from "../../lib/dialogA11y";
+import { useOverlayBackdrop } from "../../lib/overlayDismiss";
 
 export default function PlacementDialog({ lang, onClose }: { lang: string; onClose: () => void }) {
   const S = learnerStrings();
   const ref = useDialogA11y<HTMLDivElement>(onClose);
+  const backdrop = useOverlayBackdrop(ref, onClose);
   const [bands, setBands] = useState<PlacementBand[] | null>(null);
   const [known, setKnown] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
@@ -82,8 +84,8 @@ export default function PlacementDialog({ lang, onClose }: { lang: string; onClo
   }
 
   return (
-    <div className="modal-backdrop" data-show="in" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal-panel" ref={ref} role="dialog" aria-modal="true" aria-label={S.placement.title}>
+    <div className="modal-backdrop" data-show="in" {...backdrop}>
+      <div className="modal-panel modal-panel-content" ref={ref} role="dialog" aria-modal="true" aria-label={S.placement.title}>
         <div className="modal-header">
           <h3>{S.placement.title}</h3>
           <button className="icon-btn" aria-label="close" onClick={onClose}>

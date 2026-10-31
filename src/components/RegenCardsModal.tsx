@@ -12,6 +12,7 @@ type BrowserCardRecord = CardRecord & { docTitle?: string };
 import { readingWorkflow } from "../lib/readingWorkflow";
 import { eventBus } from "../lib/eventbus";
 import { useDialogA11y } from "../lib/dialogA11y";
+import { useOverlayBackdrop } from "../lib/overlayDismiss";
 import { useT } from "../lib/i18n";
 import { IconAlert } from "./icons";
 
@@ -42,6 +43,7 @@ export default function RegenCardsModal({
 }) {
   const T = useT();
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
+  const backdrop = useOverlayBackdrop(panelRef, onClose);
   const [running, setRunning] = useState(true);
   const [progress, setProgress] = useState(0);
   const [thinking, setThinking] = useState(false);
@@ -126,12 +128,9 @@ export default function RegenCardsModal({
   return (
     <div
       className="modal-backdrop"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClose();
-      }}
+      {...backdrop}
     >
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label={T("用当前提示词重新生成")} onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel modal-panel-content" ref={panelRef} role="dialog" aria-modal="true" aria-label={T("用当前提示词重新生成")} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>{T("用当前提示词重新生成")}</h2>
           <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>
